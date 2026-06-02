@@ -44,6 +44,44 @@ def _make_display_hook():  # pragma: no cover - needs a display
     return hook
 
 
+def _cmd_detect(args: argparse.Namespace) -> int:
+    """Run the detector on an image or folder and write annotated copies."""
+    import glob
+
+    import cv2
+
+    from .annotate import annotate
+    from .detection.detector import FireDetector
+
+    detector = FireDetector.from_checkpoint(
+        args.model, arch=args.arch, score_threshold=args.score_thr
+    )
+
+    if os.path.isdir(args.input):
+        paths = sorted(
+            p for p in glob.glob(os.path.join(args.input, "*"))
+            if os.path.splitext(p)[1].lower() in (".jpg", ".jpeg", ".png", ".bmp")
+        )
+    else:
+        paths = [args.input]
+
+    os.makedirs(args.out, exist_ok=True)
+    total = 0
+    for path in paths:
+        image = cv2.imread(path)
+        if image is None:
+            continue
+        dets = detector.detect(image)
+        total += len(dets)
+        canvas = annotate(image, [(d, None) for d in dets])
+        out_path = os.path.join(args.out, os.path.basename(path))
+        cv2.imwrite(out_path, canvas)
+        summary = ", ".join(f"{d.label}:{d.confidence:.2f}" for d in dets) or "none"
+        print(f"{os.path.basename(path)} -> {len(dets)} detection(s) [{summary}]")
+    print(f"\nwrote {len(paths)} annotated image(s) to {args.out} ({total} detections)")
+    return 0
+
+
 def _cmd_setup_zones(args: argparse.Namespace) -> int:
     from .zonetool import (
         auto_bands,
@@ -80,6 +118,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--max-frames", type=int, default=None, help="stop after N frames")
     p_run.add_argument("--display", action="store_true", help="show annotated frames")
     p_run.set_defaults(func=_cmd_run)
+
+    p_det = sub.add_parser("detect", help="run detection on an image/folder (no floors)")
+    p_det.add_argument("--model", required=True, help="trained model checkpoint (.pt)")
+    p_det.add_argument("--input", required=True, help="image file or folder of images")
+    p_det.add_argument("--out", default="detect_out", help="dir for annotated images")
+    p_det.add_argument("--arch", default="ssdlite", choices=("ssdlite", "retinanet"))
+    p_det.add_argument("--score-thr", type=float, default=0.5)
+    p_det.set_defaults(func=_cmd_detect)
 
     p_zones = sub.add_parser("setup-zones", help="define a camera's floor zones")
     p_zones.add_argument("--config", required=True, help="camera config YAML")

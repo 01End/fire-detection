@@ -11,6 +11,7 @@ that ``FireDetector.from_checkpoint`` can load directly.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from typing import Optional
@@ -71,13 +72,25 @@ def run_training(
     pretrained_backbone: bool = True,
 ) -> str:
     dev = _device(device)
+
+    # Use the class map written by prepare_dfire (handles datasets that flip 0/1).
+    class_map = None
+    cm_path = os.path.join(data_dir, "class_map.json")
+    if os.path.exists(cm_path):
+        with open(cm_path, encoding="utf-8") as fh:
+            class_map = {int(k): int(v) for k, v in json.load(fh).items()}
+        print(f"using class_map from {cm_path}: {class_map}")
+
+    ds_kwargs = {"class_map": class_map} if class_map else {}
     train_ds = YoloDetectionDataset(
         os.path.join(data_dir, "train", "images"),
         os.path.join(data_dir, "train", "labels"),
+        **ds_kwargs,
     )
     val_ds = YoloDetectionDataset(
         os.path.join(data_dir, "val", "images"),
         os.path.join(data_dir, "val", "labels"),
+        **ds_kwargs,
     )
     train_loader = DataLoader(
         train_ds, batch_size=batch_size, shuffle=True,
