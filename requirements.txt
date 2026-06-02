@@ -1,0 +1,10 @@
+# Runtime + training dependencies (all permissively licensed)
+torch>=2.0          # BSD-3
+torchvision>=0.15   # BSD-3
+opencv-python>=4.8  # Apache-2.0
+numpy>=1.24         # BSD-3
+PyYAML>=6.0         # MIT
+streamlit>=1.30     # Apache-2.0
+
+# Dev / test
+pytest>=7.4
