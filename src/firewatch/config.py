@@ -31,8 +31,6 @@ def build_pipeline(
     frame_hook=None,
 ) -> Pipeline:
     """Construct a fully-wired Pipeline from a parsed camera config."""
-    from .detection.detector import FireDetector  # local import: keeps torch optional
-
     source = factory.build_source(cfg)
     mapper = FloorMapper.from_config(cfg)
 
@@ -42,9 +40,23 @@ def build_pipeline(
             f"model checkpoint not found: {model_path}\n"
             "Train one with the scripts in training/, or pass --model."
         )
-    detector = FireDetector.from_checkpoint(
+
+    # Select the detection backend. 'torch' is the verified default; 'tf' uses the
+    # KerasHub backend (requires tensorflow + keras-hub). Lazy-imported so only the
+    # chosen backend's heavy deps are loaded.
+    backend = (det_cfg.get("backend") or "torch").lower()
+    if backend == "tf":
+        from .detection.tf_detector import TFFireDetector as Detector
+        default_arch = "retinanet"
+    elif backend == "torch":
+        from .detection.detector import FireDetector as Detector
+        default_arch = "ssdlite"
+    else:
+        raise ValueError(f"unknown detection.backend {backend!r} (expected torch|tf)")
+
+    detector = Detector.from_checkpoint(
         model_path,
-        arch=det_cfg.get("arch", "ssdlite"),
+        arch=det_cfg.get("arch", default_arch),
         score_threshold=float(det_cfg.get("score_threshold", 0.5)),
     )
 

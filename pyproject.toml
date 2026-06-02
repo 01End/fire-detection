@@ -16,6 +16,14 @@ dependencies = [
     "streamlit>=1.30",
 ]
 
+[project.optional-dependencies]
+# TensorFlow/KerasHub backend (alternative to the default torch backend).
+# Native Windows is CPU-only; use WSL2 or Colab for GPU. Needs Python<=3.13.
+tf = [
+    "tensorflow>=2.19",
+    "keras-hub",
+]
+
 [project.scripts]
 firewatch = "firewatch.cli:main"
 

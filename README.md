@@ -53,6 +53,15 @@ streamlit run dashboard/app.py
 
 Training the detector is documented in `training/` (run after verifying the dataset license).
 
+## Detection backends
+
+The detector has two interchangeable backends behind the same interface; pick one in the
+camera config (`detection.backend`):
+
+- **`torch`** (default) — torchvision SSDlite. Verified; uses the GPU natively on Windows.
+- **`tf`** — KerasHub RetinaNet. For TensorFlow users. CPU-only on native Windows (TF
+  dropped Windows GPU after 2.10 — use WSL2/Colab for GPU). See `docs/TF_PORT.md`.
+
 ## License
 
 Code: MIT (see project owner). All dependencies are permissively licensed for commercial use.

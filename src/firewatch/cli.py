@@ -51,9 +51,13 @@ def _cmd_detect(args: argparse.Namespace) -> int:
     import cv2
 
     from .annotate import annotate
-    from .detection.detector import FireDetector
 
-    detector = FireDetector.from_checkpoint(
+    if args.backend == "tf":
+        from .detection.tf_detector import TFFireDetector as Detector
+    else:
+        from .detection.detector import FireDetector as Detector
+
+    detector = Detector.from_checkpoint(
         args.model, arch=args.arch, score_threshold=args.score_thr
     )
 
@@ -123,6 +127,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_det.add_argument("--model", required=True, help="trained model checkpoint (.pt)")
     p_det.add_argument("--input", required=True, help="image file or folder of images")
     p_det.add_argument("--out", default="detect_out", help="dir for annotated images")
+    p_det.add_argument("--backend", default="torch", choices=("torch", "tf"))
     p_det.add_argument("--arch", default="ssdlite", choices=("ssdlite", "retinanet"))
     p_det.add_argument("--score-thr", type=float, default=0.5)
     p_det.set_defaults(func=_cmd_detect)
