@@ -1,0 +1,40 @@
+# Example camera config. Copy per camera and adjust.
+camera_id: cam1
+
+# Where frames come from. type: file | webcam | rtsp
+source:
+  type: file
+  path: data/samples/clip.mp4   # video file or a folder of images
+  # type: webcam
+  # index: 0
+  # type: rtsp
+  # url: rtsp://user:pass@host:554/stream
+
+# Detector settings.
+detection:
+  arch: ssdlite           # ssdlite (CPU-friendly) | retinanet (GPU, accurate)
+  score_threshold: 0.5
+
+# False-alarm suppression: confirm only after N of the last M frames, then cool down.
+debounce:
+  confirm_n: 3
+  window_m: 5
+  cooldown_seconds: 30
+
+# Where annotated snapshots + events.jsonl are written.
+output_dir: output
+
+# Future hand-off to the company's central system (see spec "Open items").
+company_system:
+  enabled: false
+
+# Floor zones (image polygons -> floor numbers). Generate with:
+#   firewatch setup-zones --config configs/cameras/cam1.yaml --auto 3
+# or draw them interactively (omit --auto). Example for a 640x480 frame, 3 floors:
+floors:
+  - floor: 3
+    polygon: [[0, 0], [640, 0], [640, 160], [0, 160]]
+  - floor: 2
+    polygon: [[0, 160], [640, 160], [640, 320], [0, 320]]
+  - floor: 1
+    polygon: [[0, 320], [640, 320], [640, 480], [0, 480]]
