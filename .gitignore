@@ -14,6 +14,12 @@ data/
 output/
 *.log
 
+# Demo / detect artifacts
+detect_out/
+tf_detect_out/
+model_demo_*.jpg
+D-Fire/
+
 # OS / editor
 .DS_Store
 .vscode/

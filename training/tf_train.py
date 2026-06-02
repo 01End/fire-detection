@@ -53,10 +53,8 @@ def run_training(
     )
 
     model = build_model(arch="retinanet", pretrained_backbone=pretrained_backbone)
-    model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=lr),
-        box_loss=keras.losses.MeanAbsoluteError(reduction="sum"),
-    )
+    # compile() with just an optimizer uses RetinaNet's built-in box + focal losses.
+    model.compile(optimizer=keras.optimizers.Adam(learning_rate=lr))
 
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     model.fit(

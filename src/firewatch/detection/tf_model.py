@@ -4,14 +4,19 @@ Uses ``keras_hub.models.RetinaNetObjectDetector`` (RetinaNet + ResNet50-FPN, Apa
 Keras is imported lazily inside ``build_model`` so the pure helpers below (box-format and
 label mapping) are importable and testable without TensorFlow installed.
 
-NOTE: This backend is UNVERIFIED until ``tensorflow`` + ``keras-hub`` are installed (see
-docs/TF_PORT.md). KerasHub specifics:
-  * bounding boxes use ``yxyx`` order (y first), absolute pixels
-  * class indices are 0-based (0=fire, 1=smoke) — no background class
+VERIFIED on TF 2.20 / keras-hub 0.29 (native Windows, CPU). KerasHub specifics learned
+during verification:
+  * The KerasHub *preprocessor* hard-requires ``tensorflow-text``, which has no Windows
+    wheel — so we build with ``preprocessor=None`` and do ImageNet normalization ourselves
+    (see IMAGENET_MEAN/STD).
+  * bounding boxes use ``yxyx`` order (y first), absolute pixels.
+  * class indices are 0-based (0=fire, 1=smoke) — no background class.
+  * ``compile()`` with just an optimizer uses RetinaNet's built-in box/focal losses.
+  * ``predict()`` returns dict keys: boxes, confidence, labels, num_detections.
 """
 from __future__ import annotations
 
-from typing import List, Sequence, Tuple
+from typing import Sequence, Tuple
 
 from .types import CLASS_NAMES
 
@@ -20,7 +25,11 @@ BBox = Tuple[float, float, float, float]
 # KerasHub default input size; multiple of 128 to satisfy the FPN strides.
 DEFAULT_IMAGE_SIZE = 512
 COCO_PRESET = "retinanet_resnet50_fpn_coco"
-IMAGENET_BACKBONE = "resnet_50_imagenet"
+
+# ImageNet normalization (RetinaNet expects it; we apply it ourselves since the KerasHub
+# preprocessor can't load on Windows). norm = (rgb/255 - mean) / std.
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
 
 
 def num_classes_for(class_names: Sequence[str] = CLASS_NAMES) -> int:
@@ -57,6 +66,15 @@ def scale_box_xyxy(
     return (x1 * sx, y1 * sy, x2 * sx, y2 * sy)
 
 
+def normalize_imagenet(rgb):
+    """ImageNet-normalize an HxWx3 RGB array (0-255) -> float32. Pure numpy."""
+    import numpy as np
+
+    mean = np.array(IMAGENET_MEAN, dtype="float32")
+    std = np.array(IMAGENET_STD, dtype="float32")
+    return ((rgb.astype("float32") / 255.0) - mean) / std
+
+
 def build_model(
     arch: str = "retinanet",
     class_names: Sequence[str] = CLASS_NAMES,
@@ -64,34 +82,19 @@ def build_model(
 ):
     """Construct a RetinaNetObjectDetector with a head sized for ``class_names``.
 
-    ``pretrained_backbone=True`` fine-tunes from the COCO preset (recommended);
-    False builds on a from-scratch ImageNet backbone. Both download weights on first
-    use, so this requires network access the first time.
+    The ResNet50-FPN backbone is loaded from the COCO preset (cached after first
+    download) for a good fine-tuning start. ``preprocessor=None`` because the KerasHub
+    preprocessor needs tensorflow-text (unavailable on Windows); callers must feed
+    ImageNet-normalized images (use ``normalize_imagenet``).
     """
-    import keras_hub  # lazy: only needed when actually building a model
+    import keras_hub
 
     if arch != "retinanet":
         raise ValueError(f"TF backend supports arch='retinanet', got {arch!r}")
 
-    num_classes = num_classes_for(class_names)
-
-    if pretrained_backbone:
-        backbone = keras_hub.models.Backbone.from_preset(COCO_PRESET)
-        preprocessor = keras_hub.models.RetinaNetObjectDetectorPreprocessor.from_preset(
-            COCO_PRESET
-        )
-    else:
-        image_encoder = keras_hub.models.Backbone.from_preset(IMAGENET_BACKBONE)
-        backbone = keras_hub.models.RetinaNetBackbone(
-            image_encoder=image_encoder, min_level=3, max_level=5, use_p5=True
-        )
-        image_converter = keras_hub.layers.RetinaNetImageConverter(scale=1 / 255)
-        preprocessor = keras_hub.models.RetinaNetObjectDetectorPreprocessor(
-            image_converter=image_converter
-        )
-
+    backbone = keras_hub.models.Backbone.from_preset(COCO_PRESET)
     return keras_hub.models.RetinaNetObjectDetector(
         backbone=backbone,
-        num_classes=num_classes,
-        preprocessor=preprocessor,
+        num_classes=num_classes_for(class_names),
+        preprocessor=None,
     )

@@ -1,19 +1,24 @@
 """Build a tf.data pipeline from YOLO-format labels for KerasHub RetinaNet.
 
-Produces batches of ``(images, {"boxes": yxyx, "labels": 0-indexed})`` as the KerasHub
-object-detection guide expects. Class ids are remapped from the dataset's convention to
-ours (fire=0, smoke=1).
+Produces batches of ``(images, {"boxes": yxyx, "labels": 0-indexed})``. All image work
+(resize, ImageNet-normalize, box rescaling, padding) is done in NumPy so we avoid the
+KerasHub preprocessing layers that require tensorflow-text (unavailable on Windows).
 
-UNVERIFIED until tensorflow + keras-hub are installed (see docs/TF_PORT.md).
+Class ids are remapped from the dataset's convention to ours (fire=0, smoke=1).
+VERIFIED on TF 2.20 / keras-hub 0.29 (Windows CPU).
 """
 from __future__ import annotations
 
 import glob
 import json
 import os
-from typing import Dict, List, Mapping, Optional, Tuple
+from typing import List, Mapping, Optional, Tuple
 
 import numpy as np
+
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+from firewatch.detection.tf_model import normalize_imagenet  # noqa: E402
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp")
 
@@ -24,8 +29,8 @@ DEFAULT_CLASS_MAP: Mapping[int, int] = {1: OUR_FIRE, 0: OUR_SMOKE}
 
 
 def load_class_map(data_dir: str) -> Mapping[int, int]:
-    """Load class_map.json if present (written by prepare_dfire, torch 1-based) and
-    convert to TF 0-based by subtracting one; else use the D-Fire default."""
+    """Load class_map.json (written by prepare_dfire, torch 1-based) and convert to TF
+    0-based by subtracting one; else use the D-Fire default."""
     path = os.path.join(data_dir, "class_map.json")
     if os.path.exists(path):
         with open(path, encoding="utf-8") as fh:
@@ -39,21 +44,37 @@ def _label_for(image_path: str, labels_dir: str) -> str:
     return os.path.join(labels_dir, stem + ".txt")
 
 
-def _read_record(image_path: str, labels_dir: str, class_map: Mapping[int, int]):
+def _list_images(images_dir: str) -> List[str]:
+    return sorted(
+        p for p in glob.glob(os.path.join(images_dir, "*"))
+        if os.path.splitext(p)[1].lower() in IMAGE_EXTS
+    )
+
+
+def _read_sample(
+    image_path: str, labels_dir: str, class_map: Mapping[int, int],
+    image_size: int, max_boxes: int,
+) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
     import cv2
 
     bgr = cv2.imread(image_path)
     if bgr is None:
         return None
     h, w = bgr.shape[:2]
-    rgb = bgr[:, :, ::-1].astype("float32")
+    rgb = cv2.resize(bgr[:, :, ::-1], (image_size, image_size))
+    image = normalize_imagenet(rgb)
 
-    boxes: List[List[float]] = []
-    labels: List[int] = []
+    sy, sx = image_size / h, image_size / w
+    boxes = np.zeros((max_boxes, 4), dtype="float32")
+    labels = np.full((max_boxes,), -1, dtype="int32")  # -1 = padding/ignore
+
     lbl = _label_for(image_path, labels_dir)
+    k = 0
     if os.path.exists(lbl):
         with open(lbl, encoding="utf-8") as fh:
             for line in fh:
+                if k >= max_boxes:
+                    break
                 parts = line.split()
                 if len(parts) != 5:
                     continue
@@ -61,25 +82,15 @@ def _read_record(image_path: str, labels_dir: str, class_map: Mapping[int, int])
                 mapped = class_map.get(int(cls))
                 if mapped is None:
                     continue
-                x1 = (cx - bw / 2) * w
-                y1 = (cy - bh / 2) * h
-                x2 = (cx + bw / 2) * w
-                y2 = (cy + bh / 2) * h
-                boxes.append([y1, x1, y2, x2])  # yxyx
-                labels.append(mapped)
-
-    return (
-        rgb,
-        np.asarray(boxes, dtype="float32").reshape(-1, 4),
-        np.asarray(labels, dtype="int32").reshape(-1),
-    )
-
-
-def _list_images(images_dir: str) -> List[str]:
-    return sorted(
-        p for p in glob.glob(os.path.join(images_dir, "*"))
-        if os.path.splitext(p)[1].lower() in IMAGE_EXTS
-    )
+                # YOLO normalized cxcywh -> absolute yxyx in the resized image.
+                x1 = (cx - bw / 2) * w * sx
+                y1 = (cy - bh / 2) * h * sy
+                x2 = (cx + bw / 2) * w * sx
+                y2 = (cy + bh / 2) * h * sy
+                boxes[k] = [y1, x1, y2, x2]
+                labels[k] = mapped
+                k += 1
+    return image, boxes, labels
 
 
 def build_dataset(
@@ -92,7 +103,6 @@ def build_dataset(
     max_boxes: int = 100,
 ):
     """Return a batched tf.data.Dataset of (images, {"boxes","labels"})."""
-    import keras
     import tensorflow as tf
 
     class_map = dict(class_map or DEFAULT_CLASS_MAP)
@@ -100,48 +110,24 @@ def build_dataset(
     if not paths:
         raise FileNotFoundError(f"no images in {images_dir}")
 
-    bbox_format = "yxyx"
-
     def gen():
         order = list(range(len(paths)))
         if shuffle:
             np.random.shuffle(order)
         for i in order:
-            rec = _read_record(paths[i], labels_dir, class_map)
-            if rec is None:
+            sample = _read_sample(paths[i], labels_dir, class_map, image_size, max_boxes)
+            if sample is None:
                 continue
-            img, boxes, labels = rec
-            yield {
-                "images": img,
-                "bounding_boxes": {"boxes": boxes, "labels": labels},
-            }
+            image, boxes, labels = sample
+            yield image, {"boxes": boxes, "labels": labels}
 
-    output_signature = {
-        "images": tf.TensorSpec(shape=(None, None, 3), dtype=tf.float32),
-        "bounding_boxes": {
-            "boxes": tf.TensorSpec(shape=(None, 4), dtype=tf.float32),
-            "labels": tf.TensorSpec(shape=(None,), dtype=tf.int32),
+    output_signature = (
+        tf.TensorSpec(shape=(image_size, image_size, 3), dtype=tf.float32),
+        {
+            "boxes": tf.TensorSpec(shape=(max_boxes, 4), dtype=tf.float32),
+            "labels": tf.TensorSpec(shape=(max_boxes,), dtype=tf.int32),
         },
-    }
-
+    )
     ds = tf.data.Dataset.from_generator(gen, output_signature=output_signature)
-
-    resizing = keras.layers.Resizing(
-        height=image_size, width=image_size, interpolation="bilinear",
-        pad_to_aspect_ratio=True, bounding_box_format=bbox_format,
-    )
-    max_box_layer = keras.layers.MaxNumBoundingBoxes(
-        max_number=max_boxes, bounding_box_format=bbox_format
-    )
-
-    def to_tuple(record):
-        return record["images"], {
-            "boxes": record["bounding_boxes"]["boxes"],
-            "labels": record["bounding_boxes"]["labels"],
-        }
-
-    ds = ds.map(resizing, num_parallel_calls=tf.data.AUTOTUNE)
-    ds = ds.map(max_box_layer, num_parallel_calls=tf.data.AUTOTUNE)
     ds = ds.batch(batch_size, drop_remainder=True)
-    ds = ds.map(to_tuple, num_parallel_calls=tf.data.AUTOTUNE)
     return ds.prefetch(tf.data.AUTOTUNE)

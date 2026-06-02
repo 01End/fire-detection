@@ -57,17 +57,18 @@ class _FakeModel:
 
 def test_detect_maps_scales_and_filters():
     preds = {
-        # yxyx boxes in the 512x512 model space: one real, one padding.
+        # yxyx boxes in the 512x512 model space: one real, one padding (label -1).
         "boxes": np.array([[[256, 256, 384, 384], [-1, -1, -1, -1]]], dtype="float32"),
         "confidence": np.array([[0.9, 0.0]], dtype="float32"),
-        "classes": np.array([[0, -1]], dtype="int32"),  # 0=fire, -1=padding
+        "labels": np.array([[0, -1]], dtype="int32"),  # 0=fire, -1=padding
+        "num_detections": np.array([2], dtype="int32"),
     }
     det = TFFireDetector(_FakeModel(preds), score_threshold=0.5, image_size=512)
     image = np.zeros((100, 200, 3), dtype=np.uint8)  # h=100, w=200
 
     results = det.detect(image)
 
-    assert len(results) == 1  # padding row dropped
+    assert len(results) == 1  # padding row dropped (label < 0)
     r = results[0]
     assert isinstance(r, Detection)
     assert r.label == "fire"
@@ -80,7 +81,8 @@ def test_detect_threshold_filters_low_scores():
     preds = {
         "boxes": np.array([[[0, 0, 10, 10]]], dtype="float32"),
         "confidence": np.array([[0.3]], dtype="float32"),
-        "classes": np.array([[1]], dtype="int32"),
+        "labels": np.array([[1]], dtype="int32"),
+        "num_detections": np.array([1], dtype="int32"),
     }
     det = TFFireDetector(_FakeModel(preds), score_threshold=0.5, image_size=512)
     assert det.detect(np.zeros((64, 64, 3), dtype=np.uint8)) == []
