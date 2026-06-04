@@ -24,3 +24,8 @@ D-Fire/
 .DS_Store
 .vscode/
 .idea/
+
+# Doc build scratch
+.docbuild/
+*.docx
+*.pdf

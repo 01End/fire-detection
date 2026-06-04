@@ -1,0 +1,104 @@
+"""Run the TF fire/smoke detector on a video file or a live webcam (demo tool).
+
+Two modes, chosen by ``--source``:
+  * a path  -> reads the video, writes an annotated ``.mp4`` (``--out``).
+  * an int  -> opens that webcam index and shows a live annotated window.
+
+TF inference is CPU-only on native Windows (~3-5 s/frame at 512px), so detection runs on
+every Nth frame (``--every``). Drop ``--image-size`` to 320/384 to speed it up.
+
+Examples::
+
+    # annotate a downloaded clip
+    PYTHONPATH=src python tools/detect_video.py --model models/fire_retinanet.weights.h5 \
+        --source data/demo_clip.mp4 --out demo_annotated.mp4 --every 15
+
+    # live webcam (point it at a fire video on a screen, or a candle)
+    PYTHONPATH=src python tools/detect_video.py --model models/fire_retinanet.weights.h5 \
+        --source 0 --display --image-size 384
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(description="TF fire/smoke detection on video/webcam")
+    p.add_argument("--model", required=True, help="TF .weights.h5 checkpoint")
+    p.add_argument("--source", required=True,
+                   help="video file path, OR a webcam index like 0")
+    p.add_argument("--out", default=None, help="output annotated .mp4 (file mode)")
+    p.add_argument("--image-size", type=int, default=512, help="match the training size")
+    p.add_argument("--score-thr", type=float, default=0.3)
+    p.add_argument("--every", type=int, default=15, help="run detection every Nth frame")
+    p.add_argument("--display", action="store_true", help="show a live window")
+    a = p.parse_args(argv)
+
+    import cv2
+
+    from firewatch.annotate import annotate
+    from firewatch.detection.tf_detector import TFFireDetector
+
+    is_webcam = a.source.isdigit()
+    detector = TFFireDetector.from_checkpoint(
+        a.model, arch="retinanet", score_threshold=a.score_thr, image_size=a.image_size
+    )
+
+    cap = cv2.VideoCapture(int(a.source) if is_webcam else a.source)
+    if not cap.isOpened():
+        raise SystemExit(f"cannot open source: {a.source!r}")
+
+    writer = None
+    if a.out and not is_webcam:
+        src_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        out_fps = max(1.0, src_fps / max(1, a.every))  # keep playback ~real-time
+        writer = cv2.VideoWriter(
+            a.out, cv2.VideoWriter_fourcc(*"mp4v"), out_fps, (w, h)
+        )
+
+    show = a.display or is_webcam
+    idx = processed = total_dets = 0
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            if idx % max(1, a.every) == 0:
+                dets = detector.detect(frame)
+                total_dets += len(dets)
+                canvas = annotate(frame, [(d, None) for d in dets])
+                processed += 1
+                if writer is not None:
+                    writer.write(canvas)
+                if show:
+                    cv2.imshow("FireWatch demo (q to quit)", canvas)
+                if processed % 10 == 0:
+                    print(f"  processed {processed} frames, {total_dets} detections")
+            elif show and is_webcam:
+                # keep the live feed smooth between detections
+                cv2.imshow("FireWatch demo (q to quit)", frame)
+            if show and (cv2.waitKey(1) & 0xFF) == ord("q"):
+                break
+            idx += 1
+    finally:
+        cap.release()
+        if writer is not None:
+            writer.release()
+        if show:
+            cv2.destroyAllWindows()
+
+    print(f"\ndone: read {idx} frames, ran detection on {processed}, "
+          f"{total_dets} total detections")
+    if writer is not None:
+        print(f"wrote annotated video -> {a.out}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
