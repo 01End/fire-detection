@@ -58,9 +58,11 @@ def _cmd_detect(args: argparse.Namespace) -> int:
     else:
         from .detection.detector import FireDetector as Detector
 
-    detector = Detector.from_checkpoint(
-        args.model, arch=args.arch, score_threshold=args.score_thr
-    )
+    ckpt_kwargs = dict(arch=args.arch, score_threshold=args.score_thr)
+    if args.backend == "tf":
+        # TF/KerasHub model is fully-convolutional; detect at the size it trained on.
+        ckpt_kwargs["image_size"] = args.image_size
+    detector = Detector.from_checkpoint(args.model, **ckpt_kwargs)
 
     if os.path.isdir(args.input):
         paths = sorted(
@@ -131,6 +133,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_det.add_argument("--backend", default="torch", choices=("torch", "tf"))
     p_det.add_argument("--arch", default="ssdlite", choices=("ssdlite", "retinanet"))
     p_det.add_argument("--score-thr", type=float, default=0.5)
+    p_det.add_argument("--image-size", type=int, default=512,
+                       help="(tf backend) inference size; match the training --image-size")
     p_det.set_defaults(func=_cmd_detect)
 
     p_zones = sub.add_parser("setup-zones", help="define a camera's floor zones")

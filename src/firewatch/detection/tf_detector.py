@@ -54,6 +54,13 @@ class TFFireDetector:
     ) -> "TFFireDetector":
         model = build_model(arch=arch, class_names=class_names)
         model.load_weights(path)
+        # KerasHub's NMS decoder defaults to confidence_threshold=0.5, which silently
+        # drops legitimate but under-confident detections before our own score gate ever
+        # sees them. Lower it to our threshold so --score-thr is the single source of truth.
+        try:
+            model.prediction_decoder.confidence_threshold = min(score_threshold, 0.5)
+        except AttributeError:  # pragma: no cover - decoder shape may vary by version
+            pass
         return cls(model, device=device, score_threshold=score_threshold,
                    class_names=class_names, image_size=image_size)
 
