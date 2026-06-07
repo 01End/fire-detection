@@ -28,7 +28,7 @@ def run_training(
     data_dir: str,
     epochs: int = 8,
     batch_size: int = 4,
-    lr: float = 0.001,
+    lr: float = 0.0001,
     out: str = "models/fire_retinanet.weights.h5",
     image_size: int = 512,
     pretrained_backbone: bool = True,
@@ -61,16 +61,23 @@ def run_training(
     model.compile(optimizer=keras.optimizers.Adam(learning_rate=lr))
 
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    # Stabilizers: a high LR made an earlier run diverge after a few epochs, so we
+    # halve the LR whenever val_loss stalls and stop early (keeping the best weights)
+    # rather than overshooting. ModelCheckpoint still mirrors the best weights to disk.
+    callbacks = [
+        keras.callbacks.ModelCheckpoint(
+            filepath=out, save_best_only=True, save_weights_only=True,
+            monitor="val_loss",
+        ),
+        keras.callbacks.ReduceLROnPlateau(
+            monitor="val_loss", factor=0.5, patience=2, min_lr=1e-6, verbose=1,
+        ),
+        keras.callbacks.EarlyStopping(
+            monitor="val_loss", patience=4, restore_best_weights=True, verbose=1,
+        ),
+    ]
     model.fit(
-        train_ds,
-        epochs=epochs,
-        validation_data=val_ds,
-        callbacks=[
-            keras.callbacks.ModelCheckpoint(
-                filepath=out, save_best_only=True, save_weights_only=True,
-                monitor="val_loss",
-            )
-        ],
+        train_ds, epochs=epochs, validation_data=val_ds, callbacks=callbacks,
     )
     print(f"best weights -> {out}")
     return out
@@ -81,7 +88,7 @@ def main(argv=None) -> int:
     p.add_argument("--data", required=True, help="dataset root with train/ and val/")
     p.add_argument("--epochs", type=int, default=8)
     p.add_argument("--batch-size", type=int, default=4)
-    p.add_argument("--lr", type=float, default=0.001)
+    p.add_argument("--lr", type=float, default=0.0001)
     p.add_argument("--out", default="models/fire_retinanet.weights.h5")
     p.add_argument("--image-size", type=int, default=512)
     p.add_argument("--train-split", default="train", help="subdir name for training data")

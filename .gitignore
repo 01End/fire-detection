@@ -29,3 +29,7 @@ D-Fire/
 .docbuild/
 *.docx
 *.pdf
+
+dfire.zip
+*.zip
+detect_sample/
