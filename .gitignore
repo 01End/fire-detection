@@ -30,6 +30,9 @@ D-Fire/
 *.docx
 *.pdf
 
+# Local docs / handoff notes — kept local, never committed to GitHub
+docs/
+
 dfire.zip
 *.zip
 detect_sample/
