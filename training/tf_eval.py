@@ -29,10 +29,15 @@ from .tf_dataset import _label_for, _list_images, load_class_map  # noqa: E402
 
 def box_iou(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Pairwise IoU between two xyxy box sets, [N,4] vs [M,4] -> [N,M]."""
-    a = np.asarray(a, dtype="float32").reshape(-1, 4)
-    b = np.asarray(b, dtype="float32").reshape(-1, 4)
+    # float64 + sanitize: a model can emit degenerate (huge / non-finite) boxes on
+    # out-of-distribution images; float32 area math overflows and corrupts the IoU.
+    # Collapsing inf/nan to 0 makes such a box zero-area -> 0 IoU -> a correct false positive.
+    a = np.nan_to_num(np.asarray(a, dtype="float64").reshape(-1, 4),
+                      nan=0.0, posinf=0.0, neginf=0.0)
+    b = np.nan_to_num(np.asarray(b, dtype="float64").reshape(-1, 4),
+                      nan=0.0, posinf=0.0, neginf=0.0)
     if a.shape[0] == 0 or b.shape[0] == 0:
-        return np.zeros((a.shape[0], b.shape[0]), dtype="float32")
+        return np.zeros((a.shape[0], b.shape[0]), dtype="float64")
     area_a = np.clip(a[:, 2] - a[:, 0], 0, None) * np.clip(a[:, 3] - a[:, 1], 0, None)
     area_b = np.clip(b[:, 2] - b[:, 0], 0, None) * np.clip(b[:, 3] - b[:, 1], 0, None)
     lt = np.maximum(a[:, None, :2], b[None, :, :2])
