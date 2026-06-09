@@ -36,11 +36,13 @@ class TFFireDetector:
         score_threshold: float = 0.5,
         class_names: Sequence[str] = CLASS_NAMES,
         image_size: int = DEFAULT_IMAGE_SIZE,
+        exposure: str = "none",
     ):
         self.model = model
         self.score_threshold = score_threshold
         self.class_names = tuple(class_names)
         self.image_size = image_size
+        self.exposure = exposure
 
     @classmethod
     def from_checkpoint(
@@ -51,6 +53,7 @@ class TFFireDetector:
         score_threshold: float = 0.5,
         class_names: Sequence[str] = CLASS_NAMES,
         image_size: int = DEFAULT_IMAGE_SIZE,
+        exposure: str = "none",
     ) -> "TFFireDetector":
         model = build_model(arch=arch, class_names=class_names)
         model.load_weights(path)
@@ -62,12 +65,15 @@ class TFFireDetector:
         except AttributeError:  # pragma: no cover - decoder shape may vary by version
             pass
         return cls(model, device=device, score_threshold=score_threshold,
-                   class_names=class_names, image_size=image_size)
+                   class_names=class_names, image_size=image_size, exposure=exposure)
 
     def _prepare(self, image_bgr: np.ndarray) -> np.ndarray:
         import cv2
 
+        from .exposure import auto_exposure
+
         rgb = image_bgr[:, :, ::-1]
+        rgb = auto_exposure(rgb, self.exposure)  # "none" by default = unchanged
         resized = cv2.resize(rgb, (self.image_size, self.image_size))
         return normalize_imagenet(resized)  # model has no preprocessor
 

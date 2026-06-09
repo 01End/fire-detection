@@ -34,6 +34,9 @@ def run_training(
     pretrained_backbone: bool = True,
     train_split: str = "train",
     val_split: str = "val",
+    augment: bool = False,
+    exposure: str = "none",
+    init_weights: "str | None" = None,
 ) -> str:
     import keras
 
@@ -42,6 +45,7 @@ def run_training(
 
     class_map = load_class_map(data_dir)
     print(f"class_map (dataset-id -> tf-index): {class_map}")
+    print(f"augment={augment}  exposure={exposure}")
 
     # train_split/val_split let us point straight at e.g. D-Fire's train/ and test/
     # folders without copying the dataset into a train//val// layout.
@@ -49,14 +53,21 @@ def run_training(
         os.path.join(data_dir, train_split, "images"),
         os.path.join(data_dir, train_split, "labels"),
         class_map=class_map, image_size=image_size, batch_size=batch_size, shuffle=True,
+        augment=augment, exposure=exposure,
     )
     val_ds = build_dataset(
         os.path.join(data_dir, val_split, "images"),
         os.path.join(data_dir, val_split, "labels"),
         class_map=class_map, image_size=image_size, batch_size=batch_size, shuffle=False,
+        augment=False, exposure=exposure,
     )
 
     model = build_model(arch="retinanet", pretrained_backbone=pretrained_backbone)
+    if init_weights:
+        # Warm-start: continue from a previously trained model instead of the COCO backbone,
+        # so fine-tuning on the merged set converges in far fewer epochs (fast retrain).
+        model.load_weights(init_weights)
+        print(f"warm-started from {init_weights}")
     # compile() with just an optimizer uses RetinaNet's built-in box + focal losses.
     model.compile(optimizer=keras.optimizers.Adam(learning_rate=lr))
 
@@ -93,9 +104,16 @@ def main(argv=None) -> int:
     p.add_argument("--image-size", type=int, default=512)
     p.add_argument("--train-split", default="train", help="subdir name for training data")
     p.add_argument("--val-split", default="val", help="subdir name for validation data")
+    p.add_argument("--augment", action="store_true",
+                   help="random brightness/exposure jitter on the training split")
+    p.add_argument("--exposure", default="none", choices=("none", "clahe", "gamma"),
+                   help="deterministic exposure normalization (match this at inference/eval)")
+    p.add_argument("--init-weights", default=None,
+                   help="warm-start from this .weights.h5 (fast fine-tune instead of from COCO)")
     a = p.parse_args(argv)
     run_training(a.data, a.epochs, a.batch_size, a.lr, a.out, a.image_size,
-                 train_split=a.train_split, val_split=a.val_split)
+                 train_split=a.train_split, val_split=a.val_split,
+                 augment=a.augment, exposure=a.exposure, init_weights=a.init_weights)
     return 0
 
 

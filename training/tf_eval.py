@@ -110,6 +110,8 @@ def main(argv=None) -> int:
                    help="evaluate at most N images (CPU is slow); <=0 means all")
     p.add_argument("--seed", type=int, default=0,
                    help="random seed for sampling when --limit is set")
+    p.add_argument("--exposure", default="none", choices=("none", "clahe", "gamma"),
+                   help="adaptive exposure normalization applied before detection")
     a = p.parse_args(argv)
 
     images_dir = os.path.join(a.data, "images")
@@ -123,7 +125,8 @@ def main(argv=None) -> int:
     from firewatch.detection.tf_detector import TFFireDetector
 
     detector = TFFireDetector.from_checkpoint(
-        a.model, arch="retinanet", score_threshold=a.score_thr, image_size=a.image_size
+        a.model, arch="retinanet", score_threshold=a.score_thr, image_size=a.image_size,
+        exposure=a.exposure,
     )
 
     paths = _list_images(images_dir)

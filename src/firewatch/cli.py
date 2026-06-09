@@ -62,6 +62,7 @@ def _cmd_detect(args: argparse.Namespace) -> int:
     if args.backend == "tf":
         # TF/KerasHub model is fully-convolutional; detect at the size it trained on.
         ckpt_kwargs["image_size"] = args.image_size
+        ckpt_kwargs["exposure"] = args.exposure
     detector = Detector.from_checkpoint(args.model, **ckpt_kwargs)
 
     if os.path.isdir(args.input):
@@ -135,6 +136,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_det.add_argument("--score-thr", type=float, default=0.5)
     p_det.add_argument("--image-size", type=int, default=512,
                        help="(tf backend) inference size; match the training --image-size")
+    p_det.add_argument("--exposure", default="none", choices=("none", "clahe", "gamma"),
+                       help="(tf backend) adaptive exposure normalization before detection")
     p_det.set_defaults(func=_cmd_detect)
 
     p_zones = sub.add_parser("setup-zones", help="define a camera's floor zones")

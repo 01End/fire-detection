@@ -19,6 +19,7 @@ import numpy as np
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from firewatch.detection.tf_model import normalize_imagenet  # noqa: E402
+from firewatch.detection.exposure import auto_exposure, jitter_exposure  # noqa: E402
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp")
 
@@ -53,7 +54,7 @@ def _list_images(images_dir: str) -> List[str]:
 
 def _read_sample(
     image_path: str, labels_dir: str, class_map: Mapping[int, int],
-    image_size: int, max_boxes: int,
+    image_size: int, max_boxes: int, augment: bool = False, exposure: str = "none",
 ) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
     import cv2
 
@@ -61,7 +62,13 @@ def _read_sample(
     if bgr is None:
         return None
     h, w = bgr.shape[:2]
-    rgb = cv2.resize(bgr[:, :, ::-1], (image_size, image_size))
+    # Exposure handling mirrors inference (TFFireDetector._prepare): optional random jitter
+    # (train only) then the same deterministic normalization, before resize + ImageNet-norm.
+    rgb = np.ascontiguousarray(bgr[:, :, ::-1])
+    if augment:
+        rgb = jitter_exposure(rgb)
+    rgb = auto_exposure(rgb, exposure)
+    rgb = cv2.resize(rgb, (image_size, image_size))
     image = normalize_imagenet(rgb)
 
     sy, sx = image_size / h, image_size / w
@@ -101,6 +108,8 @@ def build_dataset(
     batch_size: int = 4,
     shuffle: bool = True,
     max_boxes: int = 100,
+    augment: bool = False,
+    exposure: str = "none",
 ):
     """Return a batched tf.data.Dataset of (images, {"boxes","labels"})."""
     import tensorflow as tf
@@ -115,7 +124,8 @@ def build_dataset(
         if shuffle:
             np.random.shuffle(order)
         for i in order:
-            sample = _read_sample(paths[i], labels_dir, class_map, image_size, max_boxes)
+            sample = _read_sample(paths[i], labels_dir, class_map, image_size, max_boxes,
+                                  augment=augment, exposure=exposure)
             if sample is None:
                 continue
             image, boxes, labels = sample

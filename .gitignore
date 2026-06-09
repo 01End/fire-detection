@@ -33,3 +33,7 @@ D-Fire/
 dfire.zip
 *.zip
 detect_sample/
+
+# Demo video clips (large)
+demos/
+*.mp4

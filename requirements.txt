@@ -6,11 +6,14 @@ numpy>=1.24         # BSD-3
 PyYAML>=6.0         # MIT
 streamlit>=1.30     # Apache-2.0
 
+# --- TensorFlow / KerasHub backend (the active backend for this project) ---
+# Native Windows = CPU only (TF dropped Windows GPU after 2.10); use WSL2/Colab for GPU.
+# Needs Python <= 3.13.
+tensorflow>=2.19    # Apache-2.0
+keras-hub           # Apache-2.0
+
+# --- Demo tooling ---
+yt-dlp>=2024.0      # Unlicense — downloads demo clips (tools/fetch_clip.py)
+
 # Dev / test
 pytest>=7.4
-
-# --- Optional: TensorFlow/KerasHub backend (instead of torch) ---
-# Install with:  pip install tensorflow>=2.19 keras-hub
-# Native Windows = CPU only (TF dropped Windows GPU after 2.10); use WSL2/Colab for GPU.
-# tensorflow>=2.19
-# keras-hub
