@@ -23,17 +23,17 @@ import sys
 # =====================================================================
 #  👇  THE ONLY THINGS YOU CHANGE
 LINK = "https://youtu.be/whlymAuRtzU?si=w8HMTNPqL87pGOoN"   # video to download
-MODEL = "models/fire_retinanet_full.weights.h5"        # trained weights (put it in models/)
+MODEL = "models/fire_retinanet_indoor.weights.h5"      # best in+outdoor model (indoor-retrained)
 
 MAX_SECONDS = 90      # clips longer than this get trimmed; shorter ones run whole
 START = 60            # trim start in seconds  (1:00 — fire is clearly visible here)
 DURATION = 60         # trim length in seconds (1:00 -> 2:00)
 
-SCORE_THR = 0.5       # confidence cutoff for the demo (reported operating point is 0.6 @ IoU0.5)
-IMAGE_SIZE = 512      # match training size
+SCORE_THR = 0.6       # best operating point (peak F1 indoor 0.67 / overall 0.58 @ IoU0.5)
+IMAGE_SIZE = 384      # the indoor-retrained model was fine-tuned at 384
 EVERY = 15            # run detection on every Nth frame (keeps CPU runs tractable)
 SMOOTH = True         # write every frame at full fps (smooth video) vs one frame per detection
-EXPOSURE = "clahe"    # adaptive exposure before detection: "none" | "clahe" | "gamma"
+EXPOSURE = "none"     # this model was trained with exposure none; keep it matched
 HEIGHT = 720          # max download resolution (usually 360p without ffmpeg)
 # =====================================================================
 
