@@ -39,6 +39,12 @@ def main(argv=None) -> int:
     p.add_argument("--smooth", action="store_true",
                    help="write EVERY frame at full fps, keeping the last boxes between "
                         "detection frames -> smooth playback instead of a choppy slideshow")
+    p.add_argument("--hold", type=float, default=0.0,
+                   help="temporal persistence (seconds): when a detection frame comes back "
+                        "EMPTY, keep showing the last boxes for up to this long instead of "
+                        "dropping them instantly -> fills brief flicker gaps. This is also the "
+                        "alert-smoothing idea: real fire/smoke persists, lone false positives "
+                        "don't. 0 = off (clear as soon as a frame sees nothing).")
     p.add_argument("--exposure", default="none", choices=("none", "clahe", "gamma"),
                    help="adaptive exposure normalization applied before detection")
     a = p.parse_args(argv)
@@ -58,9 +64,12 @@ def main(argv=None) -> int:
     if not cap.isOpened():
         raise SystemExit(f"cannot open source: {a.source!r}")
 
+    src_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    # how many frames a detection should persist when later frames come back empty
+    hold_frames = int(a.hold * src_fps)
+
     writer = None
     if a.out and not is_webcam:
-        src_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         # smooth -> full source fps (every frame written); else one frame per detection.
@@ -72,6 +81,7 @@ def main(argv=None) -> int:
     show = a.display or is_webcam
     idx = processed = total_dets = 0
     last_dets: list = []
+    frames_since_seen = hold_frames + 1   # start "expired" so nothing is held before the first hit
     try:
         while True:
             ok, frame = cap.read()
@@ -79,11 +89,19 @@ def main(argv=None) -> int:
                 break
             run_now = idx % max(1, a.every) == 0
             if run_now:
-                last_dets = detector.detect(frame)
-                total_dets += len(last_dets)
+                dets = detector.detect(frame)
                 processed += 1
+                if dets:
+                    last_dets = dets
+                    total_dets += len(dets)
+                    frames_since_seen = 0
+                elif frames_since_seen > hold_frames:
+                    # nothing seen and the hold window has expired -> drop the boxes
+                    last_dets = []
+                # else: empty frame but still within the hold window -> keep last_dets
                 if processed % 10 == 0:
                     print(f"  processed {processed} frames, {total_dets} detections")
+            frames_since_seen += 1
             if a.smooth:
                 # draw the most recent detections on EVERY frame -> smooth full-fps video
                 canvas = annotate(frame, [(d, None) for d in last_dets])
