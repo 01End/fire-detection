@@ -52,6 +52,53 @@ def _list_images(images_dir: str) -> List[str]:
     )
 
 
+def _label_has_fire(label_path: str, class_map: Mapping[int, int]) -> bool:
+    """True if the YOLO label file contains at least one box that maps to OUR_FIRE."""
+    if not os.path.exists(label_path):
+        return False
+    with open(label_path, encoding="utf-8") as fh:
+        for line in fh:
+            parts = line.split()
+            if len(parts) != 5:
+                continue
+            if class_map.get(int(float(parts[0]))) == OUR_FIRE:
+                return True
+    return False
+
+
+def _is_indoor(image_path: str) -> bool:
+    """Indoor/added images are prefixed at merge time (see prepare_indoor.py)."""
+    base = os.path.basename(image_path)
+    return base.startswith("indoor_") or base.startswith("extra_")
+
+
+def _oversampled_paths(
+    paths: List[str], labels_dir: str, class_map: Mapping[int, int],
+    oversample_fire: int, oversample_indoor: int,
+) -> List[str]:
+    """Repeat fire / indoor images so the trainer sees the weak cases more often.
+
+    Repeat count is additive so an indoor-fire image (the rarest, most valuable case) is seen
+    most: rep = 1 + (fire-1 if has_fire) + (indoor-1 if indoor). Pure background stays at 1.
+    """
+    if oversample_fire <= 1 and oversample_indoor <= 1:
+        return paths
+    out: List[str] = []
+    n_fire = n_indoor = 0
+    for p in paths:
+        rep = 1
+        if oversample_fire > 1 and _label_has_fire(_label_for(p, labels_dir), class_map):
+            rep += oversample_fire - 1
+            n_fire += 1
+        if oversample_indoor > 1 and _is_indoor(p):
+            rep += oversample_indoor - 1
+            n_indoor += 1
+        out.extend([p] * rep)
+    print(f"oversample: {len(paths)} imgs -> {len(out)} samples "
+          f"(fire x{oversample_fire} on {n_fire}, indoor x{oversample_indoor} on {n_indoor})")
+    return out
+
+
 def _read_sample(
     image_path: str, labels_dir: str, class_map: Mapping[int, int],
     image_size: int, max_boxes: int, augment: bool = False, exposure: str = "none",
@@ -110,6 +157,8 @@ def build_dataset(
     max_boxes: int = 100,
     augment: bool = False,
     exposure: str = "none",
+    oversample_fire: int = 1,
+    oversample_indoor: int = 1,
 ):
     """Return a batched tf.data.Dataset of (images, {"boxes","labels"})."""
     import tensorflow as tf
@@ -118,6 +167,8 @@ def build_dataset(
     paths = _list_images(images_dir)
     if not paths:
         raise FileNotFoundError(f"no images in {images_dir}")
+    paths = _oversampled_paths(paths, labels_dir, class_map,
+                               oversample_fire, oversample_indoor)
 
     def gen():
         order = list(range(len(paths)))

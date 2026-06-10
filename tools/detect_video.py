@@ -34,6 +34,10 @@ def main(argv=None) -> int:
     p.add_argument("--out", default=None, help="output annotated .mp4 (file mode)")
     p.add_argument("--image-size", type=int, default=512, help="match the training size")
     p.add_argument("--score-thr", type=float, default=0.3)
+    p.add_argument("--score-thr-fire", type=float, default=None,
+                   help="per-class threshold for fire (overrides --score-thr for that class)")
+    p.add_argument("--score-thr-smoke", type=float, default=None,
+                   help="per-class threshold for smoke (overrides --score-thr for that class)")
     p.add_argument("--every", type=int, default=15, help="run detection every Nth frame")
     p.add_argument("--display", action="store_true", help="show a live window")
     p.add_argument("--smooth", action="store_true",
@@ -55,10 +59,17 @@ def main(argv=None) -> int:
     from firewatch.detection.tf_detector import TFFireDetector
 
     is_webcam = a.source.isdigit()
+    per_class = {}
+    if a.score_thr_fire is not None:
+        per_class["fire"] = a.score_thr_fire
+    if a.score_thr_smoke is not None:
+        per_class["smoke"] = a.score_thr_smoke
     detector = TFFireDetector.from_checkpoint(
         a.model, arch="retinanet", score_threshold=a.score_thr, image_size=a.image_size,
-        exposure=a.exposure,
+        exposure=a.exposure, score_thresholds=per_class or None,
     )
+    if per_class:
+        print(f"per-class thresholds: {per_class} (fallback {a.score_thr})")
 
     cap = cv2.VideoCapture(int(a.source) if is_webcam else a.source)
     if not cap.isOpened():

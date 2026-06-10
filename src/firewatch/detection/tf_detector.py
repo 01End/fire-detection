@@ -7,7 +7,7 @@ VERIFIED on TF 2.20 / keras-hub 0.29 (Windows CPU). TF runs CPU-only on native W
 """
 from __future__ import annotations
 
-from typing import List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 
@@ -37,12 +37,20 @@ class TFFireDetector:
         class_names: Sequence[str] = CLASS_NAMES,
         image_size: int = DEFAULT_IMAGE_SIZE,
         exposure: str = "none",
+        score_thresholds: Optional[Dict[str, float]] = None,
     ):
         self.model = model
         self.score_threshold = score_threshold
+        # Optional per-class gate (e.g. {"fire":0.4,"smoke":0.6}); falls back to the scalar.
+        self.score_thresholds = dict(score_thresholds) if score_thresholds else None
         self.class_names = tuple(class_names)
         self.image_size = image_size
         self.exposure = exposure
+
+    def _threshold_for(self, label: str) -> float:
+        if self.score_thresholds and label in self.score_thresholds:
+            return self.score_thresholds[label]
+        return self.score_threshold
 
     @classmethod
     def from_checkpoint(
@@ -54,18 +62,24 @@ class TFFireDetector:
         class_names: Sequence[str] = CLASS_NAMES,
         image_size: int = DEFAULT_IMAGE_SIZE,
         exposure: str = "none",
+        score_thresholds: Optional[Dict[str, float]] = None,
     ) -> "TFFireDetector":
         model = build_model(arch=arch, class_names=class_names)
         model.load_weights(path)
         # KerasHub's NMS decoder defaults to confidence_threshold=0.5, which silently
         # drops legitimate but under-confident detections before our own score gate ever
-        # sees them. Lower it to our threshold so --score-thr is the single source of truth.
+        # sees them. Lower it to the LOWEST gate (scalar or any per-class) so the score
+        # gate below is the single source of truth.
+        floor = score_threshold
+        if score_thresholds:
+            floor = min([score_threshold, *score_thresholds.values()])
         try:
-            model.prediction_decoder.confidence_threshold = min(score_threshold, 0.5)
+            model.prediction_decoder.confidence_threshold = min(floor, 0.5)
         except AttributeError:  # pragma: no cover - decoder shape may vary by version
             pass
         return cls(model, device=device, score_threshold=score_threshold,
-                   class_names=class_names, image_size=image_size, exposure=exposure)
+                   class_names=class_names, image_size=image_size, exposure=exposure,
+                   score_thresholds=score_thresholds)
 
     def _prepare(self, image_bgr: np.ndarray) -> np.ndarray:
         import cv2
@@ -91,17 +105,16 @@ class TFFireDetector:
         for i in range(min(n, len(labels))):
             cls = int(labels[i])
             conf = float(confidence[i])
-            if cls < 0 or conf < self.score_threshold:
+            if cls < 0:
+                continue
+            label = label_from_index(cls, self.class_names)
+            if conf < self._threshold_for(label):
                 continue
             xyxy = yxyx_to_xyxy(boxes[i])
             xyxy = scale_box_xyxy(
                 xyxy, from_size=(self.image_size, self.image_size), to_size=(w, h)
             )
             detections.append(
-                Detection(
-                    bbox=xyxy,
-                    label=label_from_index(cls, self.class_names),
-                    confidence=conf,
-                )
+                Detection(bbox=xyxy, label=label, confidence=conf)
             )
         return detections

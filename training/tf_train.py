@@ -37,6 +37,8 @@ def run_training(
     augment: bool = False,
     exposure: str = "none",
     init_weights: "str | None" = None,
+    oversample_fire: int = 1,
+    oversample_indoor: int = 1,
 ) -> str:
     import keras
 
@@ -54,6 +56,7 @@ def run_training(
         os.path.join(data_dir, train_split, "labels"),
         class_map=class_map, image_size=image_size, batch_size=batch_size, shuffle=True,
         augment=augment, exposure=exposure,
+        oversample_fire=oversample_fire, oversample_indoor=oversample_indoor,
     )
     val_ds = build_dataset(
         os.path.join(data_dir, val_split, "images"),
@@ -110,10 +113,15 @@ def main(argv=None) -> int:
                    help="deterministic exposure normalization (match this at inference/eval)")
     p.add_argument("--init-weights", default=None,
                    help="warm-start from this .weights.h5 (fast fine-tune instead of from COCO)")
+    p.add_argument("--oversample-fire", type=int, default=1,
+                   help="repeat factor for training images containing fire (weak class)")
+    p.add_argument("--oversample-indoor", type=int, default=1,
+                   help="repeat factor for indoor_/extra_ prefixed training images (weak domain)")
     a = p.parse_args(argv)
     run_training(a.data, a.epochs, a.batch_size, a.lr, a.out, a.image_size,
                  train_split=a.train_split, val_split=a.val_split,
-                 augment=a.augment, exposure=a.exposure, init_weights=a.init_weights)
+                 augment=a.augment, exposure=a.exposure, init_weights=a.init_weights,
+                 oversample_fire=a.oversample_fire, oversample_indoor=a.oversample_indoor)
     return 0
 
 
